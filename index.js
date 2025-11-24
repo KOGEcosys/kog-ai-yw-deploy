@@ -13,6 +13,7 @@ app.get("/", (req, res) => {
 app.get("/api/search", async (req, res) => {
   try {
     const { q, page = 1 } = req.query;
+
     const url = `${BASE}/search/suggest.do?keywords=${encodeURIComponent(q)}&page=${page}`;
 
     const result = await axios.get(url, {
