@@ -95,6 +95,38 @@ app.get("/", (req, res) => {
     msg: "YiwuGo NEW API Proxy running with token + referer",
   });
 });
+// ================================
+//  YiwuGo 新版 API → 商品列表
+//  GET /api/products?q=bag
+// ================================
+
+app.get("/api/products", async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ ok: false, error: "Missing q parameter" });
+    }
+
+    // 获取 Token（自动缓存）
+    const token = await getToken();
+
+    const url = `${BASE}/open/cn_product/list?access_token=${token}&q=${encodeURIComponent(q)}`;
+
+    const result = await axios.get(url, {
+      headers: {
+        referer: REFERER,
+        "User-Agent": "Mozilla/5.0",
+      }
+    });
+
+    return res.json({ ok: true, data: result.data });
+
+  } catch (err) {
+    console.error("❌ /api/products error:", err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // ------------ 商品列表：/api/products ------------
 // 对应官方示例：/open/cn_product/list?access_token=xxx&q=玩具
@@ -217,3 +249,4 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log("🚀 KOG Mall Gateway running on PORT:", PORT);
 });
+
