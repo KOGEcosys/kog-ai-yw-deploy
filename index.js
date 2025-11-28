@@ -1,116 +1,158 @@
-// index.js
-const express = require("express");
-const axios = require("axios");
-const app = express();
+/**
+ * KOG YiwuGo Proxy v5 — New API Edition
+ * 自动获取 token + 自动刷新 + 支持商品搜索
+ * Author: Dr. David Lin + KOG Global Mall
+ */
 
-// === YiwuGo API 基础设置 ===
+import express from "express";
+import axios from "axios";
+import cors from "cors";
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// ================================
+// 🔧 配置（你必须设置这四个）
+// ================================
+const YIWUGO_AUTH_URL = "https://open.yiwugo.com/oauth/token";
+const YIWUGO_API_BASE = "https://open.yiwugo.com";  // 正式环境
 const CLIENT_ID = process.env.YIWUGO_CLIENT_ID;
 const CLIENT_SECRET = process.env.YIWUGO_CLIENT_SECRET;
-const REFERER = process.env.YIWUGO_REFERER || "https://vidaintl.hezon.cn";
-const BASE_URL = process.env.YIWUGO_BASE_URL || "https://open.yiwugo.com";
 
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.warn("⚠ Missing YIWUGO_CLIENT_ID or YIWUGO_CLIENT_SECRET env vars");
-}
+let cachedToken = null;
+let tokenExpireAt = 0;
 
-// 简单内存缓存（生产环境后可以改 Redis）
-let accessToken = null;
-let tokenExpires = 0;
+// ================================
+// 🔥 自动获取 Token（含自动刷新）
+// ================================
+async function getAccessToken() {
+  const now = Date.now();
 
-// ----------- Token 管理：自动获取 + 自动刷新 ------------
-async function getToken() {
-  if (accessToken && Date.now() < tokenExpires) {
-    return accessToken;
+  // Token 有效 → 直接返回
+  if (cachedToken && now < tokenExpireAt) {
+    return cachedToken;
   }
 
-  const url = `${BASE_URL}/oauth/token?grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`;
-  const resp = await axios.post(url);
-
-  accessToken = resp.data.access_token;
-  tokenExpires = Date.now() + (resp.data.expires_in - 60) * 1000;
-
-  console.log("🔄 Token refreshed");
-  return accessToken;
-}
-
-// ----------- 通用 GET 请求函数（减少重复） -----------
-async function yiwugoGet(path, params = {}) {
-  const token = await getToken();
-  const url = `${BASE_URL}${path}`;
-
-  const resp = await axios.get(url, {
-    headers: { Referer: REFERER },
-    params: { access_token: token, ...params },
-  });
-
-  return resp.data;
-}
-
-// ------------------ API 路由 ------------------
-
-// 商品列表（支持关键词搜索）
-app.get("/api/products", async (req, res) => {
   try {
-    const q = req.query.q || "";
-    const data = await yiwugoGet("/open/cn_product/list", { q });
-    res.json(data);
+    console.log("🔑 Fetching new YiwuGo token...");
+    const response = await axios.post(
+      `${YIWUGO_AUTH_URL}?grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`
+    );
+
+    cachedToken = response.data.access_token;
+    const expiresIn = response.data.expires_in || 7200;
+    tokenExpireAt = now + expiresIn * 1000 - 60 * 1000; // 提前 60 秒刷新
+
+    console.log("✅ Token refreshed:", cachedToken);
+
+    return cachedToken;
   } catch (err) {
-    console.error("❌ /api/products error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Failed to get access token:", err.response?.data || err);
+    throw new Error("Failed to get access token");
   }
-});
+}
 
-// 商品详情
-app.get("/api/product/:id", async (req, res) => {
+// ================================
+// 🔍 商品搜索 API（新版）
+// ================================
+app.get("/api/search", async (req, res) => {
+  const q = req.query.q || "";
+  const page = req.query.page || 1;
+
   try {
-    const data = await yiwugoGet("/open/cn_product/detail", {
-      id: req.params.id,
+    const token = await getAccessToken();
+
+    const url = `${YIWUGO_API_BASE}/open/cn_product/list`;
+    const params = {
+      access_token: token,
+      q,
+      cpage: page,
+      pageSize: 60
+    };
+
+    console.log("📡 Calling YiwuGo Search:", params);
+
+    const response = await axios.get(url, { params });
+
+    res.json({
+      success: true,
+      keyword: q,
+      page,
+      data: response.data
     });
-    res.json(data);
   } catch (err) {
-    console.error("❌ /api/product/:id error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    console.error("❌ YiwuGo Search Error:", err.response?.data || err);
 
-// SKU 列表
-app.get("/api/product/:id/sku", async (req, res) => {
-  try {
-    const data = await yiwugoGet("/open/cn_product/skuList", {
-      id: req.params.id,
+    res.status(500).json({
+      success: false,
+      error: err.response?.data || "YiwuGo API error"
     });
-    res.json(data);
-  } catch (err) {
-    console.error("❌ /api/product/:id/sku error:", err);
-    res.status(500).json({ error: err.message });
   }
 });
 
-// 分类列表
-app.get("/api/categories", async (req, res) => {
+// ================================
+// 🔍 商品详情 API（新版）
+// ================================
+app.get("/api/detail", async (req, res) => {
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: "Missing id" });
+
   try {
-    const data = await yiwugoGet("/open/cn_category/list");
-    res.json(data);
+    const token = await getAccessToken();
+
+    const url = `${YIWUGO_API_BASE}/open/cn_product/detail`;
+    const params = {
+      access_token: token,
+      goodId: id
+    };
+
+    console.log("📡 Calling YiwuGo Detail:", params);
+
+    const response = await axios.get(url, { params });
+
+    res.json({
+      success: true,
+      id,
+      data: response.data
+    });
   } catch (err) {
-    console.error("❌ /api/categories error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ YiwuGo Detail Error:", err.response?.data || err);
+
+    res.status(500).json({
+      success: false,
+      error: err.response?.data || "YiwuGo API error"
+    });
   }
 });
 
-// 推荐商品
-app.get("/api/recommend", async (req, res) => {
+// ================================
+// 🖼 图片代理（避免 403）
+// ================================
+app.get("/api/img", async (req, res) => {
+  const imgUrl = req.query.url;
+  if (!imgUrl) return res.status(400).send("Missing url");
+
   try {
-    const data = await yiwugoGet("/open/cn_product/recommend");
-    res.json(data);
+    const response = await axios.get(imgUrl, {
+      responseType: "arraybuffer",
+      headers: {
+        Referer: "https://www.yiwugo.com" // 避免 403
+      }
+    });
+
+    res.set("Content-Type", response.headers["content-type"]);
+    res.send(response.data);
   } catch (err) {
-    console.error("❌ /api/recommend error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Image Proxy Error:", err);
+    res.status(500).send("Cannot fetch image");
   }
 });
 
-// ----------- 服务器运行 -----------
+// ================================
+// 🚀 Start Server
+// ================================
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`🚀 YiwuGo Proxy v2 running on port ${PORT}`);
+  console.log(`🚀 YiwuGo Proxy v5 running on port ${PORT}`);
 });
-
