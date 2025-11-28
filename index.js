@@ -1,158 +1,144 @@
-/**
- * KOG YiwuGo Proxy v5 — New API Edition
- * 自动获取 token + 自动刷新 + 支持商品搜索
- * Author: Dr. David Lin + KOG Global Mall
- */
+// ===============================
+// KOG GLOBAL MALL — Backend v3
+// YiwuGo 新版 API  + Token 自动更新
+// ===============================
 
-import express from "express";
-import axios from "axios";
-import cors from "cors";
+require("dotenv").config();
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
 
 const app = express();
+
+// ============= CORS 允许前端访问 ============
 app.use(cors());
 app.use(express.json());
 
-// ================================
-// 🔧 配置（你必须设置这四个）
-// ================================
-const YIWUGO_AUTH_URL = "https://open.yiwugo.com/oauth/token";
-const YIWUGO_API_BASE = "https://open.yiwugo.com";  // 正式环境
+// ============= YiwuGo 正式 API Base ============
+const API_BASE = "https://open.yiwugo.com";
+
+// ============= Referer（你提供的正式值） ============
+const REFERER = "https://www.vidaintl.hezon.cn";
+
+// ============= 你的 YiwuGo API 认证信息 ============
 const CLIENT_ID = process.env.YIWUGO_CLIENT_ID;
 const CLIENT_SECRET = process.env.YIWUGO_CLIENT_SECRET;
 
-let cachedToken = null;
-let tokenExpireAt = 0;
+let ACCESS_TOKEN = "";
+let TOKEN_EXPIRE_TIME = 0; // Unix 时间戳
 
-// ================================
-// 🔥 自动获取 Token（含自动刷新）
-// ================================
-async function getAccessToken() {
-  const now = Date.now();
+// ==================================================
+// 🔥 获取 Token（YiwuGo 新版要求）
+// ==================================================
+async function refreshToken() {
+    try {
+        const url = `${API_BASE}/oauth/token`;
+        const params = {
+            grant_type: "client_credentials",
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET
+        };
 
-  // Token 有效 → 直接返回
-  if (cachedToken && now < tokenExpireAt) {
-    return cachedToken;
-  }
+        const res = await axios.post(url, null, { params });
+        ACCESS_TOKEN = res.data.access_token;
+        TOKEN_EXPIRE_TIME = Date.now() + (res.data.expires_in - 60) * 1000;
 
-  try {
-    console.log("🔑 Fetching new YiwuGo token...");
-    const response = await axios.post(
-      `${YIWUGO_AUTH_URL}?grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`
-    );
-
-    cachedToken = response.data.access_token;
-    const expiresIn = response.data.expires_in || 7200;
-    tokenExpireAt = now + expiresIn * 1000 - 60 * 1000; // 提前 60 秒刷新
-
-    console.log("✅ Token refreshed:", cachedToken);
-
-    return cachedToken;
-  } catch (err) {
-    console.error("❌ Failed to get access token:", err.response?.data || err);
-    throw new Error("Failed to get access token");
-  }
+        console.log("✅ YiwuGo token refreshed:", ACCESS_TOKEN);
+        return ACCESS_TOKEN;
+    } catch (err) {
+        console.error("❌ Token refresh failed:", err?.response?.data || err);
+        return null;
+    }
 }
 
-// ================================
-// 🔍 商品搜索 API（新版）
-// ================================
-app.get("/api/search", async (req, res) => {
-  const q = req.query.q || "";
-  const page = req.query.page || 1;
+// ==================================================
+// 🔥 Token 自动管理：过期就刷新
+// ==================================================
+async function getValidToken() {
+    if (!ACCESS_TOKEN || Date.now() > TOKEN_EXPIRE_TIME) {
+        console.log("🔄 Token expired → refreshing...");
+        await refreshToken();
+    }
+    return ACCESS_TOKEN;
+}
 
-  try {
-    const token = await getAccessToken();
+// ==================================================
+// 🔥 商品列表 API（新版 YiwuGo）
+// open/cn_product/list?q=玩具&page=1
+// ==================================================
+app.get("/api/products", async (req, res) => {
+    try {
+        const q = req.query.q || "";
+        const page = req.query.page || 1;
 
-    const url = `${YIWUGO_API_BASE}/open/cn_product/list`;
-    const params = {
-      access_token: token,
-      q,
-      cpage: page,
-      pageSize: 60
-    };
+        const token = await getValidToken();
+        if (!token) return res.status(500).json({ ok: false, error: "Token unavailable" });
 
-    console.log("📡 Calling YiwuGo Search:", params);
+        const url = `${API_BASE}/open/cn_product/list`;
 
-    const response = await axios.get(url, { params });
+        const response = await axios.get(url, {
+            params: {
+                access_token: token,
+                q,
+                page
+            },
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Referer": REFERER
+            }
+        });
 
-    res.json({
-      success: true,
-      keyword: q,
-      page,
-      data: response.data
-    });
-  } catch (err) {
-    console.error("❌ YiwuGo Search Error:", err.response?.data || err);
+        res.json({
+            ok: true,
+            q,
+            page,
+            items: response.data.data || []
+        });
 
-    res.status(500).json({
-      success: false,
-      error: err.response?.data || "YiwuGo API error"
-    });
-  }
+    } catch (err) {
+        console.error("❌ Product API Error:", err?.response?.data || err);
+        res.status(500).json({
+            ok: false,
+            error: err?.response?.data || err.toString()
+        });
+    }
 });
 
-// ================================
-// 🔍 商品详情 API（新版）
-// ================================
-app.get("/api/detail", async (req, res) => {
-  const id = req.query.id;
-  if (!id) return res.status(400).json({ error: "Missing id" });
-
-  try {
-    const token = await getAccessToken();
-
-    const url = `${YIWUGO_API_BASE}/open/cn_product/detail`;
-    const params = {
-      access_token: token,
-      goodId: id
-    };
-
-    console.log("📡 Calling YiwuGo Detail:", params);
-
-    const response = await axios.get(url, { params });
-
-    res.json({
-      success: true,
-      id,
-      data: response.data
-    });
-  } catch (err) {
-    console.error("❌ YiwuGo Detail Error:", err.response?.data || err);
-
-    res.status(500).json({
-      success: false,
-      error: err.response?.data || "YiwuGo API error"
-    });
-  }
-});
-
-// ================================
-// 🖼 图片代理（避免 403）
-// ================================
+// ==================================================
+// 🔥 图片代理（YiwuGo 图片需要 Referer，否则 403）
+// ==================================================
 app.get("/api/img", async (req, res) => {
-  const imgUrl = req.query.url;
-  if (!imgUrl) return res.status(400).send("Missing url");
+    try {
+        const imgUrl = req.query.url;
+        if (!imgUrl) return res.status(400).send("Missing url");
 
-  try {
-    const response = await axios.get(imgUrl, {
-      responseType: "arraybuffer",
-      headers: {
-        Referer: "https://www.yiwugo.com" // 避免 403
-      }
-    });
+        const result = await axios.get(imgUrl, {
+            responseType: "arraybuffer",
+            headers: { "Referer": REFERER }
+        });
 
-    res.set("Content-Type", response.headers["content-type"]);
-    res.send(response.data);
-  } catch (err) {
-    console.error("❌ Image Proxy Error:", err);
-    res.status(500).send("Cannot fetch image");
-  }
+        res.set("Content-Type", result.headers["content-type"]);
+        res.send(result.data);
+
+    } catch (err) {
+        console.error("❌ Image Proxy Failed:", err?.response?.status);
+        res.status(500).send("Image fetch failed");
+    }
 });
 
-// ================================
-// 🚀 Start Server
-// ================================
+// ==================================================
+// 根路径测试
+// ==================================================
+app.get("/", (req, res) => {
+    res.json({ ok: true, msg: "KOG Mall Backend v3 running" });
+});
+
+// ==================================================
+// 启动后台 Server
+// ==================================================
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`🚀 YiwuGo Proxy v5 running on port ${PORT}`);
+
+app.listen(PORT, async () => {
+    console.log("🚀 KOG Mall Backend v3 running on", PORT);
+    await refreshToken();
 });
