@@ -25,6 +25,30 @@
 8. Merchant Alliance 商家联盟地图
 9. 结尾行动：注册、申请商家、加入 AI OPC 培训
 
+
+## 安装 ffmpeg
+
+生成 MP4 前必须先安装 `ffmpeg`。
+
+### Windows PowerShell
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Set-Location .\video\kog-wallet-anime-course
+.\install_ffmpeg.ps1
+ffmpeg -version
+```
+
+### macOS / Linux
+
+```bash
+cd video/kog-wallet-anime-course
+./install_ffmpeg.sh
+ffmpeg -version
+```
+
+> 如果公司网络或系统代理阻止下载安装，请让 IT 先允许系统包管理器访问软件源，或手动安装 ffmpeg 并把它加入 PATH。
+
 ## 快速生成 MP4
 
 ### macOS / Linux / Git Bash
