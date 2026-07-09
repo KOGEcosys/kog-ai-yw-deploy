@@ -2,7 +2,7 @@
 
 本目录提供一套可直接交给剪辑师、AI 视频工具或本地 `ffmpeg` 生成 MP4 的动漫风课程样片制作包。
 
-> 说明：当前执行环境无法安装或调用 `ffmpeg`，因此仓库内提供的是可生成 MP4 的完整素材与脚本。只要在具备 `ffmpeg` 的环境执行 `./generate_mp4.sh`，即可输出 `kog-wallet-anime-course-preview.mp4`。
+> 说明：当前执行环境无法安装或调用 `ffmpeg`，因此仓库内提供的是可生成 MP4 的完整素材与脚本。只要在具备 `ffmpeg` 的环境执行对应系统的生成脚本，即可输出 `kog-wallet-anime-course-preview.mp4`。
 
 ## 样片规格
 
@@ -27,9 +27,34 @@
 
 ## 快速生成 MP4
 
+### macOS / Linux / Git Bash
+
 ```bash
 cd video/kog-wallet-anime-course
 ./generate_mp4.sh
+```
+
+### Windows PowerShell
+
+PowerShell 5.1 不支持用 `&&` 串接命令。请使用分号 `;`，或分成两行执行。
+
+```powershell
+Set-Location .\video\kog-wallet-anime-course
+.\generate_mp4.ps1
+```
+
+如果你想写成一行，请使用：
+
+```powershell
+Set-Location .\video\kog-wallet-anime-course; .\generate_mp4.ps1
+```
+
+如果系统因为执行策略阻止 `.ps1`，请在当前 PowerShell 临时允许本次程序执行：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Set-Location .\video\kog-wallet-anime-course
+.\generate_mp4.ps1
 ```
 
 生成结果：
