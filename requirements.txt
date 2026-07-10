@@ -1,0 +1,2 @@
+# KOG Wallet MVP backend uses Python standard library only.
+# Add production packages here when migrating to PostgreSQL, email, object storage, etc.
